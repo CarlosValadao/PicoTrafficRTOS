@@ -121,8 +121,18 @@ void vPushButtonTask(void *pvParameters)
     while(1)
     {
         // Toggle mode when button A is pressed
-        if(!gpio_get(BUTTON_A)) g_semaphore_mode = !g_semaphore_mode;
-        vTaskDelay(pdMS_TO_TICKS(200));  // Debounce delay
+        if(!gpio_get(BUTTON_A))
+        {
+            if (g_semaphore_mode == SEMAPHORE_NIGHT_MODE)
+            {
+                g_semaphore_counter = SEMAPHORE_GREEN_DURATION_SEC;
+                g_semaphore_led_color = SEMAPHORE_LED_COLOR_GREEN;
+                g_sempahore_state = SEMAPHORE_GREEN_STATE;
+                g_semaphore_mode = SEMAPHORE_DAILY_MODE;
+            }
+            else g_semaphore_mode = SEMAPHORE_NIGHT_MODE;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));  // Debounce delay
     }
 }
 
@@ -136,14 +146,16 @@ void vDisplayTask(void *pvParameters)
     while(1)
     {
         oledgfx_clear_line(ssd, 40);
+        if(g_semaphore_mode == SEMAPHORE_DAILY_MODE)
+        {
+            if(g_sempahore_state == SEMAPHORE_GREEN_STATE) 
+                ssd1306_draw_string(ssd, "Siga", 24, 40);
+            else if(g_sempahore_state == SEMAPHORE_YELLOW_STATE) 
+                ssd1306_draw_string(ssd, "Atencao", 24, 40);
+            else if(g_sempahore_state == SEMAPHORE_RED_STATE) 
+                ssd1306_draw_string(ssd, "Pare", 24, 40);
+        }
         // Display appropriate message based on current state
-        if(g_sempahore_state == SEMAPHORE_GREEN_STATE) 
-            ssd1306_draw_string(ssd, "Siga", 24, 40);
-        else if(g_sempahore_state == SEMAPHORE_YELLOW_STATE) 
-            ssd1306_draw_string(ssd, "Atencao", 24, 40);
-        else if(g_sempahore_state == SEMAPHORE_RED_STATE) 
-            ssd1306_draw_string(ssd, "Pare", 24, 40);
-        
         oledgfx_render(ssd);  // Update display
         vTaskDelay(pdMS_TO_TICKS(1000));  // Update once per second
     }
@@ -156,22 +168,30 @@ void vBuzzerTask()
 {
     while(1)
     {
-        if(g_sempahore_state == SEMAPHORE_GREEN_STATE)
+        if(g_semaphore_mode == SEMAPHORE_DAILY_MODE)
         {
-            // Green state: short beep once per second
-            buzzer_beep(BUZZER_A, 251, 300);
-            vTaskDelay(pdMS_TO_TICKS(749));
+            if(g_sempahore_state == SEMAPHORE_GREEN_STATE)
+            {
+                // Green state: short beep once per second
+                buzzer_beep(BUZZER_A, 251, 300);
+                vTaskDelay(pdMS_TO_TICKS(749));
+            }
+            else if(g_sempahore_state == SEMAPHORE_YELLOW_STATE)
+            {
+                // Yellow state: rapid beeping
+                buzzer_beep(BUZZER_A, 251, 300);
+            }
+            else if(g_sempahore_state == SEMAPHORE_RED_STATE)
+            {
+                // Red state: longer beep every 1.5 seconds
+                buzzer_beep(BUZZER_A, 500, 300);
+                vTaskDelay(pdMS_TO_TICKS(1500));
+            }
         }
-        else if(g_sempahore_state == SEMAPHORE_YELLOW_STATE)
+        else
         {
-            // Yellow state: rapid beeping
-            buzzer_beep(BUZZER_A, 251, 300);
-        }
-        else if(g_sempahore_state == SEMAPHORE_RED_STATE)
-        {
-            // Red state: longer beep every 1.5 seconds
             buzzer_beep(BUZZER_A, 500, 300);
-            vTaskDelay(pdMS_TO_TICKS(1500));
+            vTaskDelay(pdMS_TO_TICKS(2000));
         }
     }
 }
@@ -185,20 +205,27 @@ void vLedColorTask(void *pvParameters)
     rgb_t *led_rgb = (rgb_t *) pvParameters;
     while(1)
     {
-        if(g_sempahore_state == SEMAPHORE_GREEN_STATE)
+        if(g_semaphore_mode == SEMAPHORE_DAILY_MODE)
         {
-            printf("VERDE\n");
-            rgb_turn_on_by_color(led_rgb, RGB_COLOR_GREEN);
+            if(g_sempahore_state == SEMAPHORE_GREEN_STATE)
+            {
+                printf("VERDE\n");
+                rgb_turn_on_by_color(led_rgb, RGB_COLOR_GREEN);
+            }
+            else if(g_sempahore_state == SEMAPHORE_YELLOW_STATE)
+            {
+                printf("AMARELO\n");
+                rgb_turn_on_by_color(led_rgb, RGB_COLOR_YELLOW);
+            }
+            else if(g_sempahore_state == SEMAPHORE_RED_STATE)
+            {
+                printf("VERMELHO\n");
+                rgb_turn_on_by_color(led_rgb, RGB_COLOR_RED);
+            }
         }
-        else if(g_sempahore_state == SEMAPHORE_YELLOW_STATE)
+        else
         {
-            printf("AMARELO\n");
             rgb_turn_on_by_color(led_rgb, RGB_COLOR_YELLOW);
-        }
-        else if(g_sempahore_state == SEMAPHORE_RED_STATE)
-        {
-            printf("VERMELHO\n");
-            rgb_turn_on_by_color(led_rgb, RGB_COLOR_RED);
         }
         vTaskDelay(pdMS_TO_TICKS(1));  // Small delay to prevent task starvation
     }
@@ -214,7 +241,10 @@ void vBlinkTask(void *pvParameters)
     while (true)
     {
         // Display current countdown number with appropriate color
-        ws2812b_draw(ws, NUMERIC_GLYPHS[g_semaphore_counter--], g_semaphore_led_color, 1);
+        if(g_semaphore_mode == SEMAPHORE_DAILY_MODE)
+            ws2812b_draw(ws, NUMERIC_GLYPHS[g_semaphore_counter--], g_semaphore_led_color, 1);
+        else
+            ws2812b_draw(ws, NUMERIC_GLYPHS[0], WS2812B_COLOR_YELLOW, 1);
         vTaskDelay(pdMS_TO_TICKS(1000));  // Update every second
         
         // Check for state transitions
@@ -273,14 +303,15 @@ int main()
     
     // Create FreeRTOS tasks
     xTaskCreate(vBlinkTask, "Blink Task", 
-        configMINIMAL_STACK_SIZE, (void *) &ws, tskIDLE_PRIORITY + 3, NULL);
-    xTaskCreate(vLedColorTask, "LED RGB", 
-        configMINIMAL_STACK_SIZE, (void *) &rgb, tskIDLE_PRIORITY + 2, NULL);
+        configMINIMAL_STACK_SIZE, (void *) &ws, tskIDLE_PRIORITY + 4, NULL);
+    xTaskCreate(vLedColorTask, "LED RGB Task", 
+        configMINIMAL_STACK_SIZE, (void *) &rgb, tskIDLE_PRIORITY + 3, NULL);
     xTaskCreate(vBuzzerTask, "Buzzer task", 
-        configMINIMAL_STACK_SIZE, NULL, tskIDLE_PRIORITY, NULL);
-    xTaskCreate(vDisplayTask, "Display", 
+        configMINIMAL_STACK_SIZE, NULL, tskIDLE_PRIORITY + 2, NULL);
+    xTaskCreate(vDisplayTask, "Display Task", 
         configMINIMAL_STACK_SIZE, (void *) &ssd, tskIDLE_PRIORITY + 1, NULL);
-    
+        xTaskCreate(vPushButtonTask, "Change Mode Button", 
+            configMINIMAL_STACK_SIZE, NULL, tskIDLE_PRIORITY, NULL);
     // Start the RTOS scheduler
     vTaskStartScheduler();
     
