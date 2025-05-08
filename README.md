@@ -1,4 +1,4 @@
-# TrafficLightRTOS [Vídeo de Apresentação]
+# TrafficLightRTOS [Vídeo de apresentação](https://youtu.be/fmsUX_tqBC0)
 
 Um sistema de semáforo de trânsito com funcionalidades de acessibilidade para pessoas com deficiência visual, desenvolvido para a plataforma RP2040 utilizando FreeRTOS, C e Pico SDK 2.1.0.
 
